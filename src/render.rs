@@ -17,14 +17,13 @@ const BAR_WIDTH: usize = 16;
 const FILLED: char = '█';
 const EMPTY: char = '░';
 
-/// Compact ASCII wordmark shown above the dashboard (figlet "small" font).
-/// Kept understated to match the calm dashboard feel; suppressed in plain mode.
+/// Compact ASCII wordmark shown above the dashboard (figlet "future" font).
+/// Three lines of box-drawing glyphs; understated to match the calm dashboard
+/// feel and suppressed in plain mode.
 const BANNER: &[&str] = &[
-    r" _",
-    r"| |___  _ ___ __ _ __ _ ___",
-    r"| / / || (_-</ _` / _` / -_)",
-    r"|_\_\\_,_/__/\__,_\__, \___|",
-    r"                  |___/",
+    r"╻┏ ╻ ╻┏━┓┏━┓┏━╸┏━╸",
+    r"┣┻┓┃ ┃┗━┓┣━┫┃╺┓┣╸ ",
+    r"╹ ╹┗━┛┗━┛╹ ╹┗━┛┗━╸",
 ];
 
 /// Render the full report to a `String`.
@@ -39,17 +38,22 @@ pub fn render(report: &Report, mode: ColorMode) -> String {
     out
 }
 
-/// Render the ASCII wordmark. Skipped in plain/no-color mode so piped or
-/// `--plain` output stays clean and machine-friendly.
+/// Render the ASCII wordmark with the tagline set inline beside it, so the
+/// header costs only the three banner lines. Skipped in plain/no-color mode so
+/// piped or `--plain` output stays clean and machine-friendly.
 fn render_banner(out: &mut String, mode: ColorMode) {
     if mode == ColorMode::None {
         return;
     }
-    for line in BANNER {
+    // Tagline sits to the right of the middle banner line.
+    let taglines = ["", "  Kiro CLI (v2) usage", ""];
+    for (line, tag) in BANNER.iter().zip(taglines) {
         out.push_str(&paint(mode, Palette::CYAN, line));
+        if !tag.is_empty() {
+            out.push_str(&dim(mode, tag));
+        }
         out.push('\n');
     }
-    out.push('\n');
 }
 
 /// A horizontal rule spanning the dashboard width.
@@ -95,13 +99,11 @@ fn fmt_credits(c: f64) -> String {
 fn render_header(out: &mut String, report: &Report, mode: ColorMode) {
     let s = &report.summary;
 
-    // When the banner is suppressed (plain mode) fall back to a text title so
-    // the output is still self-identifying.
+    // In plain mode there is no banner, so print a text title that names the
+    // Kiro CLI generation (v2 today; v3 is upcoming). In color mode the banner
+    // already carries the tagline, so we skip straight to the date range.
     if mode == ColorMode::None {
-        out.push_str("kusage  Kiro CLI usage\n");
-    } else {
-        out.push_str(&dim(mode, "Kiro CLI usage"));
-        out.push('\n');
+        out.push_str("kusage  Kiro CLI (v2) usage\n");
     }
 
     if let (Some(first), Some(last)) = (s.first_day, s.last_day) {
