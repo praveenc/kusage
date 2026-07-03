@@ -17,15 +17,39 @@ const BAR_WIDTH: usize = 16;
 const FILLED: char = '█';
 const EMPTY: char = '░';
 
+/// Compact ASCII wordmark shown above the dashboard (figlet "small" font).
+/// Kept understated to match the calm dashboard feel; suppressed in plain mode.
+const BANNER: &[&str] = &[
+    r" _",
+    r"| |___  _ ___ __ _ __ _ ___",
+    r"| / / || (_-</ _` / _` / -_)",
+    r"|_\_\\_,_/__/\__,_\__, \___|",
+    r"                  |___/",
+];
+
 /// Render the full report to a `String`.
 pub fn render(report: &Report, mode: ColorMode) -> String {
     let mut out = String::new();
+    render_banner(&mut out, mode);
     render_header(&mut out, report, mode);
     render_by_group(&mut out, "By Model", &report.by_model, mode);
     render_by_group(&mut out, "By Project", &report.by_project, mode);
     render_by_day(&mut out, &report.by_day, mode);
     render_recent(&mut out, &report.recent, mode);
     out
+}
+
+/// Render the ASCII wordmark. Skipped in plain/no-color mode so piped or
+/// `--plain` output stays clean and machine-friendly.
+fn render_banner(out: &mut String, mode: ColorMode) {
+    if mode == ColorMode::None {
+        return;
+    }
+    for line in BANNER {
+        out.push_str(&paint(mode, Palette::CYAN, line));
+        out.push('\n');
+    }
+    out.push('\n');
 }
 
 /// A horizontal rule spanning the dashboard width.
@@ -70,11 +94,15 @@ fn fmt_credits(c: f64) -> String {
 
 fn render_header(out: &mut String, report: &Report, mode: ColorMode) {
     let s = &report.summary;
-    rule(out, mode);
 
-    let mut title = bold(mode, "kusage");
-    title.push_str(&dim(mode, "  Kiro CLI usage"));
-    out.push_str(&format!("{title}\n"));
+    // When the banner is suppressed (plain mode) fall back to a text title so
+    // the output is still self-identifying.
+    if mode == ColorMode::None {
+        out.push_str("kusage  Kiro CLI usage\n");
+    } else {
+        out.push_str(&dim(mode, "Kiro CLI usage"));
+        out.push('\n');
+    }
 
     if let (Some(first), Some(last)) = (s.first_day, s.last_day) {
         let range = format!("{}  →  {}", first, last);

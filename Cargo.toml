@@ -7,7 +7,7 @@ description = "A local, fast CLI that displays Kiro CLI usage metrics with a com
 license = "MIT"
 repository = "https://github.com/praveenc/kusage"
 readme = "README.md"
-keywords = ["kiro", "usage", "cli", "tui", "metrics"]
+keywords = ["kiro", "usage", "cli", "dashboard", "credits"]
 categories = ["command-line-utilities"]
 
 [[bin]]
