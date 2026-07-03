@@ -6,6 +6,9 @@
 
 A local, fast Rust CLI that turns [Kiro CLI](https://kiro.dev)'s session data into a compact, professional usage dashboard: sessions, turns, requests, tool uses, and credits, broken down by model, project, and day.
 
+> [!NOTE]
+> `kusage` targets **Kiro CLI v2** (the current release). Kiro CLI v3 is on the way; support for its data format will follow once it lands.
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org)
 [![Local only](https://img.shields.io/badge/network-none-brightgreen.svg)](#privacy)
@@ -148,8 +151,7 @@ Status glyphs in the recent feed:
 <summary>Example output (plain text)</summary>
 
 ```
-────────────────────────────────────────────────────────────────────────
-kusage  Kiro CLI usage
+kusage  Kiro CLI (v2) usage
 2026-06-29  →  2026-07-03
 
   Sessions        12    Turns          178
