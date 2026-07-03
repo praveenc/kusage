@@ -238,7 +238,8 @@ pub fn aggregate(sessions: &[Session], since: Option<OffsetDateTime>, top_n: usi
             sessions,
         })
         .collect();
-    by_day.sort_by_key(|r| r.date);
+    // Most recent day first, matching the reverse-chronological Recent feed.
+    by_day.sort_by_key(|r| std::cmp::Reverse(r.date));
 
     let recent = build_recent(&included, since, top_n);
 
@@ -438,13 +439,14 @@ mod tests {
     }
 
     #[test]
-    fn by_day_bucketed_and_sorted() {
+    fn by_day_bucketed_and_sorted_descending() {
         let r = aggregate(&fixtures(), None, 10);
         assert_eq!(r.by_day.len(), 2);
-        assert!(r.by_day[0].date < r.by_day[1].date);
-        // 2026-07-02 has 3.0 + 1.0 = 4.0 credits.
-        let last = r.by_day.last().unwrap();
-        assert!((last.credits - 4.0).abs() < 1e-9);
+        // Newest day first.
+        assert!(r.by_day[0].date > r.by_day[1].date);
+        // 2026-07-02 (newest) has 3.0 + 1.0 = 4.0 credits.
+        assert_eq!(r.by_day[0].date.to_string(), "2026-07-02");
+        assert!((r.by_day[0].credits - 4.0).abs() < 1e-9);
     }
 
     #[test]

@@ -134,7 +134,8 @@ fn render_header(out: &mut String, report: &Report, mode: ColorMode) {
         .map(|d| d.credits)
         .fold(0.0_f64, f64::max)
         .max(f64::EPSILON);
-    let today = report.by_day.last().map(|d| d.credits).unwrap_or(0.0);
+    // Latest day's credits (by_day is sorted newest-first).
+    let today = report.by_day.first().map(|d| d.credits).unwrap_or(0.0);
     let frac = today / peak_day;
 
     let credits_label = format!("  {:<10}{:>8}", "Credits", fmt_credits(s.credits));

@@ -136,7 +136,7 @@ The dashboard has five sections, top to bottom:
 | **Summary** | Total sessions, turns, requests, tool uses, and credits, with a bar comparing your latest day to your busiest. |
 | **By Model** | Which models you use most, ranked by credits, with an impact bar and a color-coded share. |
 | **By Project** | Same ranking, grouped by the working directory each session ran in. |
-| **By Day** | A day-by-day mini-bar timeline of credit usage. |
+| **By Day** | A day-by-day mini-bar timeline of credit usage, most recent day first. |
 | **Recent Sessions** | Your latest sessions in reverse-chronological order, with a status glyph and the change in credits versus the previous session. |
 
 Status glyphs in the recent feed:
@@ -170,11 +170,11 @@ kusage  Kiro CLI (v2) usage
    2. home/dotfiles             73.1   4.2% █░░░░░░░░░░░░░░░
 
 ── By Day ──────────────────────────────────────────────────────────────
-  2026-06-29  ██░░░░░░░░░░░░░░    92.5  2 sess
-  2026-06-30  ░░░░░░░░░░░░░░░░     5.0  2 sess
-  2026-07-01  ████████████████     900  1 sess
-  2026-07-02  █████████░░░░░░░     521  5 sess
   2026-07-03  ████░░░░░░░░░░░░     223  2 sess
+  2026-07-02  █████████░░░░░░░     521  5 sess
+  2026-07-01  ████████████████     900  1 sess
+  2026-06-30  ░░░░░░░░░░░░░░░░     5.0  2 sess
+  2026-06-29  ██░░░░░░░░░░░░░░    92.5  2 sess
 
 ── Recent Sessions ─────────────────────────────────────────────────────
    1. ✓ add pagination to the users endpoint      21.4   +12%
