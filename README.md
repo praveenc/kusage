@@ -18,33 +18,44 @@ A local, fast Rust CLI that turns [Kiro CLI](https://kiro.dev)'s session data in
 
 ## Why kusage
 
-Kiro CLI tracks your usage locally, but there's no easy way to *see* it. `kusage` reads that local data and shows it as a calm, information-dense dashboard, so you can answer questions like:
+Kiro CLI tracks your usage locally, but there's no easy way to *see* it. `kusage` reads that local data and shows it as a calm, information-dense dashboard, so you can answer questions like: how many credits did I burn this week, which model and project drove most of my usage, and did my recent sessions succeed?
 
-- How many credits did I burn this week, and on which days?
-- Which model and which project is driving most of my usage?
-- What were my recent sessions, and did they succeed?
-
-It's inspired by [ccusage](https://github.com/ccusage/ccusage) for the concept and by `rtk`'s history view for the look. Everything runs **locally**: no network calls, no telemetry, no writing back to Kiro's data.
+Everything runs **locally**: no network calls, no telemetry, no writing back to Kiro's data.
 
 ## Install
 
-Requires [Rust](https://rustup.rs) 1.75 or newer.
+`kusage` is a Rust CLI, so you need the Rust toolchain first. If you don't have it, install it from [rustup.rs](https://rustup.rs):
 
 ```bash
-# Install from crates.io (once published)
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+Then install `kusage`:
+
+```bash
+# From crates.io (once published)
 cargo install kusage
 
-# Or install from a local checkout
+# Or from source
 git clone https://github.com/praveenc/kusage
 cd kusage
 cargo install --path .
 ```
 
-That puts a `kusage` binary on your `PATH`. Prefer not to install? Build a release binary and run it in place:
+Either way you get a `kusage` binary on your `PATH`. Prefer not to install? Build a release binary and run it in place:
 
 ```bash
+git clone https://github.com/praveenc/kusage
+cd kusage
 cargo build --release
 ./target/release/kusage
+```
+
+To update a source install later, pull and reinstall:
+
+```bash
+git pull
+cargo install --path . --force
 ```
 
 ## Quick start
@@ -55,17 +66,67 @@ Just run it:
 kusage
 ```
 
-Focus on the last week, or trim the tables:
+That prints the full dashboard for all of your Kiro CLI history. From there, narrow it down.
+
+## Everyday usage
+
+`kusage` is a single command with a few flags. Combine them freely.
+
+**Focus on a time window.** Only look at the last N days:
 
 ```bash
-kusage --since 7        # only the last 7 days
-kusage --top 5          # show the top 5 rows in each section
+kusage --since 7         # this week
+kusage --since 30        # this month
+```
+
+**Trim the tables.** Show only the top rows in each ranked section (By Model, By Project, Recent):
+
+```bash
+kusage --top 5           # top 5 rows per section
 kusage --since 30 --top 8
 ```
 
-## What you get
+**Plain text.** Drop colors and the banner (useful for logs, notes, or copy-paste):
 
-The dashboard has five sections, each designed to be readable at a glance:
+```bash
+kusage --plain
+```
+
+Colors and the banner are also disabled automatically when output isn't a terminal (piped to a file or another command) or when `NO_COLOR` is set, so you never get escape codes where you don't want them.
+
+### All options
+
+```
+kusage [OPTIONS]
+```
+
+| Flag | Description | Default |
+| --- | --- | --- |
+| `--since <DAYS>` | Only include usage from the last N days | all history |
+| `--top <N>` | Limit ranked breakdowns and the recent feed to N rows | `10` |
+| `--json` | Emit machine-readable JSON instead of the dashboard | off |
+| `--plain` | Disable colors and the banner (plain text) | off |
+| `-h`, `--help` | Print help | |
+| `-V`, `--version` | Print version | |
+
+### Scripting with `--json`
+
+`--json` prints a stable, structured report you can pipe into other tools:
+
+```bash
+# Total credits over the last 30 days
+kusage --since 30 --json | jq '.summary.credits'
+
+# Your top model by credits
+kusage --json | jq -r '.by_model[0].label'
+
+# Credits per day as a TSV
+kusage --json | jq -r '.by_day[] | [.date, .credits] | @tsv'
+```
+
+### Reading the dashboard
+
+The dashboard has five sections, top to bottom:
 
 | Section | What it shows |
 | --- | --- |
@@ -122,36 +183,23 @@ kusage  Kiro CLI usage
 
 </details>
 
-## Options
+## Contributing
 
-```
-kusage [OPTIONS]
-```
-
-| Flag | Description | Default |
-| --- | --- | --- |
-| `--since <DAYS>` | Only include usage from the last N days | all history |
-| `--top <N>` | Limit ranked breakdowns and the recent feed to N rows | `10` |
-| `--json` | Emit machine-readable JSON instead of the dashboard | off |
-| `--plain` | Disable colors and the banner (plain text) | off |
-| `-h`, `--help` | Print help | |
-| `-V`, `--version` | Print version | |
-
-### Scripting with `--json`
-
-`--json` prints a stable, structured report you can pipe into other tools:
+Issues and pull requests are welcome. To work on `kusage`:
 
 ```bash
-# Total credits over the last 30 days
-kusage --since 30 --json | jq '.summary.credits'
-
-# Your top model by credits
-kusage --json | jq -r '.by_model[0].label'
+cargo build            # build
+cargo test             # run the test suite
+cargo clippy           # lint
+cargo fmt              # format
 ```
 
-Colors are also disabled automatically when output is not a terminal or when `NO_COLOR` is set, so piping to a file or another program always yields clean text.
+---
 
-## Where the data comes from
+## How it works
+
+<details open>
+<summary><strong>Where the data comes from</strong></summary>
 
 Kiro CLI stores each chat session as a JSON file at:
 
@@ -168,11 +216,17 @@ export KIRO_DIR=/path/to/your/.kiro   # kusage reads $KIRO_DIR/sessions/cli
 kusage
 ```
 
-### Credits, not tokens
+</details>
+
+<details>
+<summary><strong>Credits, not tokens</strong></summary>
 
 Kiro reports cost as **credits** (each model has a rate multiplier), not raw token counts. The token fields exist in Kiro's data but aren't populated yet, so `kusage` shows `Tokens: n/a` until Kiro starts reporting them. Credits are the headline cost metric everywhere in the dashboard.
 
-## Privacy
+</details>
+
+<details>
+<summary><strong>Privacy</strong></summary>
 
 `kusage` is entirely local:
 
@@ -182,21 +236,17 @@ Kiro reports cost as **credits** (each model has a rate multiplier), not raw tok
 
 The only files it reads are your local Kiro session JSON files.
 
-## Scope
+</details>
+
+<details>
+<summary><strong>Scope</strong></summary>
 
 - **In:** read-only local parsing, aggregation by model / project / day / session, the dashboard, a `--json` mode, and flags for time window, top-N, and plain output.
 - **Not yet (v1):** no network features, no telemetry, no watch/live mode, no export beyond `--json`.
 
-## Contributing
+Inspired by [ccusage](https://github.com/ccusage/ccusage) for the concept and by `rtk`'s history view for the look.
 
-Issues and pull requests are welcome. To work on `kusage`:
-
-```bash
-cargo build            # build
-cargo test             # run the test suite
-cargo clippy           # lint
-cargo fmt              # format
-```
+</details>
 
 ## License
 
