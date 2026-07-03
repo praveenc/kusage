@@ -9,7 +9,7 @@ use std::collections::HashMap;
 
 use time::{Date, OffsetDateTime};
 
-use crate::model::Session;
+use crate::model::{Session, UserTurnMetadata};
 
 /// Status of a session or turn, derived from Kiro's `end_reason`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -132,16 +132,32 @@ fn project_label(cwd: Option<&str>) -> String {
 
 /// Aggregate sessions into a full report.
 ///
-/// `since` optionally drops sessions whose activity is older than the cutoff.
+/// `since` optionally drops usage older than the cutoff. The window is applied
+/// at the *turn* level: a session that spans the cutoff contributes only the
+/// turns that fall inside the window, so the Summary, By Model, By Project, and
+/// By Day sections all agree on the same date range. Recent Sessions lists
+/// sessions with any in-window activity, using their in-window totals.
 /// `top_n` limits the By-X breakdowns and recent feed length.
 pub fn aggregate(sessions: &[Session], since: Option<OffsetDateTime>, top_n: usize) -> Report {
-    // Apply the time window first.
+    // A turn is in-window when it has no cutoff, or its end timestamp is on/after
+    // the cutoff. Turns without a parseable timestamp are kept only when there is
+    // no window (we cannot place them in time otherwise).
+    let turn_in_window = |turn: &UserTurnMetadata| -> bool {
+        match since {
+            None => true,
+            Some(cutoff) => turn
+                .end_timestamp
+                .as_deref()
+                .and_then(parse_ts)
+                .map(|t| t >= cutoff)
+                .unwrap_or(false),
+        }
+    };
+
+    // Sessions with at least one in-window turn.
     let included: Vec<&Session> = sessions
         .iter()
-        .filter(|s| match since {
-            Some(cutoff) => session_time(s).map(|t| t >= cutoff).unwrap_or(false),
-            None => true,
-        })
+        .filter(|s| s.turns().iter().any(turn_in_window))
         .collect();
 
     let mut summary = Summary {
@@ -154,12 +170,23 @@ pub fn aggregate(sessions: &[Session], since: Option<OffsetDateTime>, top_n: usi
     let mut day_credits: HashMap<Date, (f64, usize)> = HashMap::new();
 
     for session in &included {
-        let s_credits = session.credits();
-        let s_turns = session.turns().len();
+        let model = session.model_id().unwrap_or("(unknown)").to_string();
+        let project = project_label(session.cwd.as_deref());
 
-        summary.turns += s_turns;
-        summary.credits += s_credits;
+        let mut s_credits = 0.0;
+        let mut s_turns = 0usize;
+        let mut days_seen: std::collections::HashSet<Date> = std::collections::HashSet::new();
+
         for turn in session.turns() {
+            if !turn_in_window(turn) {
+                continue;
+            }
+            let t_credits = turn.credits();
+            s_credits += t_credits;
+            s_turns += 1;
+
+            summary.turns += 1;
+            summary.credits += t_credits;
             summary.requests += turn.total_request_count.unwrap_or(0);
             summary.tool_uses += turn.builtin_tool_uses.unwrap_or(0);
             summary.input_tokens += turn.input_token_count.unwrap_or(0);
@@ -167,35 +194,35 @@ pub fn aggregate(sessions: &[Session], since: Option<OffsetDateTime>, top_n: usi
             if let Some(d) = turn.turn_duration {
                 summary.duration_secs += d.as_secs_f64();
             }
-            // Bucket credits by the day the turn ended.
-            if let Some(ts) = turn.end_timestamp.as_deref().and_then(parse_ts) {
-                let day = ts.date();
-                let entry = day_credits.entry(day).or_insert((0.0, 0));
-                entry.0 += turn.credits();
+
+            // Bucket credits by the day the turn ended, and track the date range.
+            if let Some(day) = turn
+                .end_timestamp
+                .as_deref()
+                .and_then(parse_ts)
+                .map(|t| t.date())
+            {
+                day_credits.entry(day).or_insert((0.0, 0)).0 += t_credits;
+                days_seen.insert(day);
+                summary.first_day = Some(summary.first_day.map_or(day, |d| d.min(day)));
+                summary.last_day = Some(summary.last_day.map_or(day, |d| d.max(day)));
             }
         }
 
-        // By model.
-        let model = session.model_id().unwrap_or("(unknown)").to_string();
+        // Count this session once per day it was active in-window.
+        for day in days_seen {
+            day_credits.entry(day).or_insert((0.0, 0)).1 += 1;
+        }
+
         let m = model_credits.entry(model).or_insert((0.0, 0, 0));
         m.0 += s_credits;
         m.1 += 1;
         m.2 += s_turns;
 
-        // By project.
-        let project = project_label(session.cwd.as_deref());
         let p = project_credits.entry(project).or_insert((0.0, 0, 0));
         p.0 += s_credits;
         p.1 += 1;
         p.2 += s_turns;
-
-        // Track day of session for day-session counts.
-        if let Some(t) = session_time(session) {
-            let day = t.date();
-            day_credits.entry(day).or_insert((0.0, 0)).1 += 1;
-            summary.first_day = Some(summary.first_day.map_or(day, |d| d.min(day)));
-            summary.last_day = Some(summary.last_day.map_or(day, |d| d.max(day)));
-        }
     }
 
     let total = summary.credits.max(f64::EPSILON);
@@ -213,7 +240,7 @@ pub fn aggregate(sessions: &[Session], since: Option<OffsetDateTime>, top_n: usi
         .collect();
     by_day.sort_by_key(|r| r.date);
 
-    let recent = build_recent(&included, top_n);
+    let recent = build_recent(&included, since, top_n);
 
     Report {
         summary,
@@ -250,7 +277,35 @@ fn rank_groups(
 }
 
 /// Build the reverse-chronological recent feed with signed deltas.
-fn build_recent(sessions: &[&Session], top_n: usize) -> Vec<RecentRow> {
+///
+/// Credits and status reflect only in-window turns (see [`aggregate`]), so the
+/// feed agrees with the rest of the report under a `--since` window.
+fn build_recent(
+    sessions: &[&Session],
+    since: Option<OffsetDateTime>,
+    top_n: usize,
+) -> Vec<RecentRow> {
+    let turn_in_window = |turn: &UserTurnMetadata| -> bool {
+        match since {
+            None => true,
+            Some(cutoff) => turn
+                .end_timestamp
+                .as_deref()
+                .and_then(parse_ts)
+                .map(|t| t >= cutoff)
+                .unwrap_or(false),
+        }
+    };
+
+    // In-window credit total for a session.
+    let win_credits = |s: &Session| -> f64 {
+        s.turns()
+            .iter()
+            .filter(|t| turn_in_window(t))
+            .map(|t| t.credits())
+            .sum()
+    };
+
     // Order by most recent activity, newest first.
     let mut ordered: Vec<(&Session, Option<OffsetDateTime>)> =
         sessions.iter().map(|s| (*s, session_time(s))).collect();
@@ -258,11 +313,12 @@ fn build_recent(sessions: &[&Session], top_n: usize) -> Vec<RecentRow> {
     ordered.truncate(top_n);
     let mut rows = Vec::with_capacity(ordered.len());
     for (i, (session, when)) in ordered.iter().enumerate() {
-        let credits = session.credits();
-        // Status: worst turn status wins (Error > Cancelled > Ok).
+        let credits = win_credits(session);
+        // Status: worst in-window turn status wins (Error > Cancelled > Ok).
         let status = session
             .turns()
             .iter()
+            .filter(|t| turn_in_window(t))
             .map(|t| Status::from_end_reason(t.end_reason.as_deref()))
             .fold(Status::Ok, |acc, s| match (acc, s) {
                 (Status::Error, _) | (_, Status::Error) => Status::Error,
@@ -272,7 +328,7 @@ fn build_recent(sessions: &[&Session], top_n: usize) -> Vec<RecentRow> {
 
         // Delta vs the next-older session in the feed.
         let delta_pct = ordered.get(i + 1).and_then(|(prev, _)| {
-            let prev_credits = prev.credits();
+            let prev_credits = win_credits(prev);
             if prev_credits.abs() < f64::EPSILON {
                 None
             } else {
@@ -427,5 +483,55 @@ mod tests {
         let r = aggregate(&fixtures(), Some(cutoff), 10);
         // Only s2 and s3 are on/after the cutoff.
         assert_eq!(r.summary.sessions, 2);
+    }
+
+    #[test]
+    fn since_window_applies_at_turn_level_across_all_sections() {
+        // A single session spanning the cutoff: one old turn, one in-window turn.
+        let spanning = make_session(
+            "span",
+            "opus",
+            "/a/proj-x",
+            &[
+                (10.0, "UserTurnEnd", "2026-07-01T09:00:00Z"), // before cutoff
+                (4.0, "UserTurnEnd", "2026-07-03T09:00:00Z"),  // in window
+            ],
+        );
+        let cutoff = parse_ts("2026-07-02T00:00:00Z").unwrap();
+        let r = aggregate(&[spanning], Some(cutoff), 10);
+
+        // Only the in-window turn counts, everywhere.
+        assert_eq!(r.summary.turns, 1);
+        assert!((r.summary.credits - 4.0).abs() < 1e-9);
+
+        // By Day must not include the pre-cutoff day (the original bug).
+        assert_eq!(r.by_day.len(), 1);
+        assert_eq!(r.by_day[0].date.to_string(), "2026-07-03");
+        assert!((r.by_day[0].credits - 4.0).abs() < 1e-9);
+
+        // By Model / By Project reflect the same in-window total.
+        assert!((r.by_model[0].credits - 4.0).abs() < 1e-9);
+        assert!((r.by_project[0].credits - 4.0).abs() < 1e-9);
+
+        // Recent feed uses the in-window credit total too.
+        assert!((r.recent[0].credits - 4.0).abs() < 1e-9);
+
+        // Summary date range is bounded by the window.
+        assert_eq!(r.summary.first_day.unwrap().to_string(), "2026-07-03");
+        assert_eq!(r.summary.last_day.unwrap().to_string(), "2026-07-03");
+    }
+
+    #[test]
+    fn since_excludes_sessions_with_no_in_window_turns() {
+        let old = make_session(
+            "old",
+            "opus",
+            "/a/proj-x",
+            &[(5.0, "UserTurnEnd", "2026-07-01T09:00:00Z")],
+        );
+        let cutoff = parse_ts("2026-07-02T00:00:00Z").unwrap();
+        let r = aggregate(&[old], Some(cutoff), 10);
+        assert_eq!(r.summary.sessions, 0);
+        assert_eq!(r.by_day.len(), 0);
     }
 }
